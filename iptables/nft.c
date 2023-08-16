@@ -701,6 +701,9 @@ nft_chain_builtin_alloc(int family, const char *tname,
 
 	nftnl_chain_set_str(c, NFTNL_CHAIN_TYPE, chain->type);
 
+	nftnl_chain_set_u64(c, NFTNL_CHAIN_PACKETS, 0);
+	nftnl_chain_set_u64(c, NFTNL_CHAIN_BYTES, 0);
+
 	return c;
 }
 
@@ -961,6 +964,7 @@ static struct nftnl_chain *nft_chain_new(struct nft_handle *h,
 				       int policy,
 				       const struct xt_counters *counters)
 {
+	static const struct xt_counters zero = {};
 	struct nftnl_chain *c;
 	const struct builtin_table *_t;
 	const struct builtin_chain *_c;
@@ -985,12 +989,10 @@ static struct nftnl_chain *nft_chain_new(struct nft_handle *h,
 		return NULL;
 	}
 
-	if (counters) {
-		nftnl_chain_set_u64(c, NFTNL_CHAIN_BYTES,
-					counters->bcnt);
-		nftnl_chain_set_u64(c, NFTNL_CHAIN_PACKETS,
-					counters->pcnt);
-	}
+	if (!counters)
+		counters = &zero;
+	nftnl_chain_set_u64(c, NFTNL_CHAIN_BYTES, counters->bcnt);
+	nftnl_chain_set_u64(c, NFTNL_CHAIN_PACKETS, counters->pcnt);
 
 	return c;
 }
@@ -1474,10 +1476,12 @@ int add_match(struct nft_handle *h, struct nft_rule_ctx *ctx,
 	case NFT_COMPAT_RULE_APPEND:
 	case NFT_COMPAT_RULE_INSERT:
 	case NFT_COMPAT_RULE_REPLACE:
-		if (!strcmp(m->u.user.name, "limit"))
-			return add_nft_limit(r, m);
-		else if (!strcmp(m->u.user.name, "among"))
+		if (!strcmp(m->u.user.name, "among"))
 			return add_nft_among(h, r, m);
+		else if (h->compat)
+			break;
+		else if (!strcmp(m->u.user.name, "limit"))
+			return add_nft_limit(r, m);
 		else if (!strcmp(m->u.user.name, "udp"))
 			return add_nft_udp(h, r, m);
 		else if (!strcmp(m->u.user.name, "tcp"))
@@ -1536,12 +1540,13 @@ static int add_meta_nftrace(struct nftnl_rule *r)
 	return 0;
 }
 
-int add_target(struct nftnl_rule *r, struct xt_entry_target *t)
+int add_target(struct nft_handle *h, struct nftnl_rule *r,
+	       struct xt_entry_target *t)
 {
 	struct nftnl_expr *expr;
 	int ret;
 
-	if (strcmp(t->u.user.name, "TRACE") == 0)
+	if (!h->compat && strcmp(t->u.user.name, "TRACE") == 0)
 		return add_meta_nftrace(r);
 
 	expr = nftnl_expr_alloc("target");
@@ -1585,8 +1590,8 @@ int add_verdict(struct nftnl_rule *r, int verdict)
 	return 0;
 }
 
-int add_action(struct nftnl_rule *r, struct iptables_command_state *cs,
-	       bool goto_set)
+int add_action(struct nft_handle *h, struct nftnl_rule *r,
+	       struct iptables_command_state *cs, bool goto_set)
 {
 	int ret = 0;
 
@@ -1602,7 +1607,7 @@ int add_action(struct nftnl_rule *r, struct iptables_command_state *cs,
 		else if (strcmp(cs->jumpto, "NFLOG") == 0)
 			ret = add_log(r, cs);
 		else
-			ret = add_target(r, cs->target->t);
+			ret = add_target(h, r, cs->target->t);
 	} else if (strlen(cs->jumpto) > 0) {
 		/* Not standard, then it's a go / jump to chain */
 		if (goto_set)
