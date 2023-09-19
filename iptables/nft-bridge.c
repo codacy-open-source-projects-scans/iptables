@@ -65,36 +65,6 @@ static void ebt_print_mac_and_mask(const unsigned char *mac, const unsigned char
 		xtables_print_mac_and_mask(mac, mask);
 }
 
-static void add_logical_iniface(struct nft_handle *h, struct nftnl_rule *r,
-				char *iface, uint32_t op)
-{
-	int iface_len;
-	uint8_t reg;
-
-	iface_len = strlen(iface);
-
-	add_meta(h, r, NFT_META_BRI_IIFNAME, &reg);
-	if (iface[iface_len - 1] == '+')
-		add_cmp_ptr(r, op, iface, iface_len - 1, reg);
-	else
-		add_cmp_ptr(r, op, iface, iface_len + 1, reg);
-}
-
-static void add_logical_outiface(struct nft_handle *h, struct nftnl_rule *r,
-				 char *iface, uint32_t op)
-{
-	int iface_len;
-	uint8_t reg;
-
-	iface_len = strlen(iface);
-
-	add_meta(h, r, NFT_META_BRI_OIFNAME, &reg);
-	if (iface[iface_len - 1] == '+')
-		add_cmp_ptr(r, op, iface, iface_len - 1, reg);
-	else
-		add_cmp_ptr(r, op, iface, iface_len + 1, reg);
-}
-
 static int add_meta_broute(struct nftnl_rule *r)
 {
 	struct nftnl_expr *expr;
@@ -117,8 +87,7 @@ static int add_meta_broute(struct nftnl_rule *r)
 	return 0;
 }
 
-static int _add_action(struct nft_handle *h, struct nftnl_rule *r,
-		       struct iptables_command_state *cs)
+static int _add_action(struct nftnl_rule *r, struct iptables_command_state *cs)
 {
 	const char *table = nftnl_rule_get_str(r, NFTNL_RULE_TABLE);
 
@@ -134,7 +103,7 @@ static int _add_action(struct nft_handle *h, struct nftnl_rule *r,
 		}
 	}
 
-	return add_action(h, r, cs, false);
+	return add_action(r, cs, false);
 }
 
 static int
@@ -181,22 +150,22 @@ static int nft_bridge_add(struct nft_handle *h, struct nft_rule_ctx *ctx,
 
 	if (fw->in[0] != '\0') {
 		op = nft_invflags2cmp(fw->invflags, EBT_IIN);
-		add_iniface(h, r, fw->in, op);
+		add_iface(h, r, fw->in, NFT_META_IIFNAME, op);
 	}
 
 	if (fw->out[0] != '\0') {
 		op = nft_invflags2cmp(fw->invflags, EBT_IOUT);
-		add_outiface(h, r, fw->out, op);
+		add_iface(h, r, fw->out, NFT_META_OIFNAME, op);
 	}
 
 	if (fw->logical_in[0] != '\0') {
 		op = nft_invflags2cmp(fw->invflags, EBT_ILOGICALIN);
-		add_logical_iniface(h, r, fw->logical_in, op);
+		add_iface(h, r, fw->logical_in, NFT_META_BRI_IIFNAME, op);
 	}
 
 	if (fw->logical_out[0] != '\0') {
 		op = nft_invflags2cmp(fw->invflags, EBT_ILOGICALOUT);
-		add_logical_outiface(h, r, fw->logical_out, op);
+		add_iface(h, r, fw->logical_out, NFT_META_BRI_OIFNAME, op);
 	}
 
 	if ((fw->bitmask & EBT_NOPROTO) == 0) {
@@ -222,7 +191,7 @@ static int nft_bridge_add(struct nft_handle *h, struct nft_rule_ctx *ctx,
 			if (nft_bridge_add_match(h, fw, ctx, r, iter->u.match->m))
 				break;
 		} else {
-			if (add_target(h, r, iter->u.watcher->t))
+			if (add_target(r, iter->u.watcher->t))
 				break;
 		}
 	}
@@ -230,7 +199,7 @@ static int nft_bridge_add(struct nft_handle *h, struct nft_rule_ctx *ctx,
 	if (add_counters(r, cs->counters.pcnt, cs->counters.bcnt) < 0)
 		return -1;
 
-	return _add_action(h, r, cs);
+	return _add_action(r, cs);
 }
 
 static bool nft_rule_to_ebtables_command_state(struct nft_handle *h,
