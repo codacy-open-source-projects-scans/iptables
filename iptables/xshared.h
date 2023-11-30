@@ -50,6 +50,7 @@ enum {
 	OPT_COMMAND	= 1 << 20,
 	OPT_ZERO	= 1 << 21,
 };
+#define NUMBER_OF_OPT	23
 
 enum {
 	CMD_NONE		= 0,
@@ -75,10 +76,10 @@ struct xtables_globals;
 struct xtables_rule_match;
 struct xtables_target;
 
-#define OPTSTRING_COMMON "-:A:C:D:E:F::I:L::M:N:P:VX::Z::" "c:d:i:j:o:p:s:t:"
-#define IPT_OPTSTRING	OPTSTRING_COMMON "R:S::W::" "46bfg:h::m:nvw::x"
-#define ARPT_OPTSTRING	OPTSTRING_COMMON "R:S::" "h::l:nvx" /* "m:" */
-#define EBT_OPTSTRING	OPTSTRING_COMMON "hv"
+#define OPTSTRING_COMMON "-:A:C:D:E:F::I:L::M:N:P:VX::Z::" "c:d:i:j:o:p:s:t:v"
+#define IPT_OPTSTRING	OPTSTRING_COMMON "R:S::W::" "46bfg:h::m:nw::x"
+#define ARPT_OPTSTRING	OPTSTRING_COMMON "R:S::" "h::l:nx" /* "m:" */
+#define EBT_OPTSTRING	OPTSTRING_COMMON "h"
 
 /* define invflags which won't collide with IPT ones.
  * arptables-nft does NOT use the legacy ARPT_INV_* defines.
@@ -211,8 +212,7 @@ void save_ipv6_addr(char letter, const struct in6_addr *addr,
 
 void print_ifaces(const char *iniface, const char *outiface, uint8_t invflags,
 		  unsigned int format);
-void save_iface(char letter, const char *iface,
-		const unsigned char *mask, int invert);
+void save_iface(char letter, const char *iface, int invert);
 
 void print_fragment(unsigned int flags, unsigned int invflags,
 		    unsigned int format, bool fake);
@@ -224,8 +224,7 @@ void assert_valid_chain_name(const char *chainname);
 void print_rule_details(unsigned int linenum, const struct xt_counters *ctrs,
 			const char *targname, uint8_t proto, uint8_t flags,
 			uint8_t invflags, unsigned int format);
-void save_rule_details(const char *iniface, unsigned const char *iniface_mask,
-		       const char *outiface, unsigned const char *outiface_mask,
+void save_rule_details(const char *iniface, const char *outiface,
 		       uint16_t proto, int frag, uint8_t invflags);
 
 int print_match_save(const struct xt_entry_match *e, const void *ip);
@@ -272,6 +271,8 @@ struct xt_cmd_parse_ops {
 	void	(*post_parse)(int command,
 			      struct iptables_command_state *cs,
 			      struct xtables_args *args);
+	const char *(*option_name)(int option);
+	int	(*option_invert)(int option);
 };
 
 struct xt_cmd_parse {
@@ -284,9 +285,11 @@ struct xt_cmd_parse {
 	bool				restore;
 	int				line;
 	int				verbose;
-	bool				xlate;
 	struct xt_cmd_parse_ops		*ops;
 };
+
+const char *ip46t_option_name(int option);
+int ip46t_option_invert(int option);
 
 void do_parse(int argc, char *argv[],
 	      struct xt_cmd_parse *p, struct iptables_command_state *cs,
@@ -307,5 +310,7 @@ extern char *arp_opcodes[];
 unsigned char *make_delete_mask(const struct xtables_rule_match *matches,
 				const struct xtables_target *target,
 				size_t entry_size);
+
+void iface_to_mask(const char *ifname, unsigned char *mask);
 
 #endif /* IPTABLES_XSHARED_H */

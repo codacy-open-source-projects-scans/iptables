@@ -161,8 +161,7 @@ static void nft_ipv4_save_rule(const struct iptables_command_state *cs,
 	save_ipv4_addr('d', &cs->fw.ip.dst, &cs->fw.ip.dmsk,
 		       cs->fw.ip.invflags & IPT_INV_DSTIP);
 
-	save_rule_details(cs->fw.ip.iniface, cs->fw.ip.iniface_mask,
-			  cs->fw.ip.outiface, cs->fw.ip.outiface_mask,
+	save_rule_details(cs->fw.ip.iniface, cs->fw.ip.outiface,
 			  cs->fw.ip.proto, cs->fw.ip.flags & IPT_F_FRAG,
 			  cs->fw.ip.invflags);
 
@@ -353,6 +352,8 @@ struct nft_family_ops nft_family_ops_ipv4 = {
 	.cmd_parse		= {
 		.proto_parse	= ipv4_proto_parse,
 		.post_parse	= ipv4_post_parse,
+		.option_name	= ip46t_option_name,
+		.option_invert	= ip46t_option_invert,
 	},
 	.rule_to_cs		= nft_rule_to_iptables_command_state,
 	.clear_cs		= xtables_clear_iptables_command_state,

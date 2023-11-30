@@ -134,14 +134,14 @@ static int nft_bridge_add(struct nft_handle *h, struct nft_rule_ctx *ctx,
 	struct ebt_entry *fw = &cs->eb;
 	uint32_t op;
 
-	if (fw->bitmask & EBT_ISOURCE) {
+	if (fw->bitmask & EBT_SOURCEMAC) {
 		op = nft_invflags2cmp(fw->invflags, EBT_ISOURCE);
 		add_addr(h, r, NFT_PAYLOAD_LL_HEADER,
 			 offsetof(struct ethhdr, h_source),
 			 fw->sourcemac, fw->sourcemsk, ETH_ALEN, op);
 	}
 
-	if (fw->bitmask & EBT_IDEST) {
+	if (fw->bitmask & EBT_DESTMAC) {
 		op = nft_invflags2cmp(fw->invflags, EBT_IDEST);
 		add_addr(h, r, NFT_PAYLOAD_LL_HEADER,
 			 offsetof(struct ethhdr, h_dest),
@@ -354,7 +354,7 @@ static void nft_bridge_print_rule(struct nft_handle *h, struct nftnl_rule *r,
 	struct iptables_command_state cs = {};
 
 	if (format & FMT_LINENUMBERS)
-		printf("%d ", num);
+		printf("%d. ", num);
 
 	nft_rule_to_ebtables_command_state(h, r, &cs);
 	__nft_bridge_save_rule(&cs, format);

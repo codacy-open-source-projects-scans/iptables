@@ -122,6 +122,7 @@ enum xt_option_flags {
  * @size:	size of the item pointed to by @ptroff; this is a safeguard
  * @min:	lowest allowed value (for singular integral types)
  * @max:	highest allowed value (for singular integral types)
+ * @base:	assumed base of parsed value for integer types (default 0)
  */
 struct xt_option_entry {
 	const char *name;
@@ -129,7 +130,7 @@ struct xt_option_entry {
 	unsigned int id, excl, also, flags;
 	unsigned int ptroff;
 	size_t size;
-	unsigned int min, max;
+	unsigned int min, max, base;
 };
 
 /**
@@ -486,6 +487,8 @@ extern void xtables_register_matches(struct xtables_match *, unsigned int);
 extern void xtables_register_target(struct xtables_target *me);
 extern void xtables_register_targets(struct xtables_target *, unsigned int);
 
+extern bool xtables_strtoul_base(const char *, char **, uintmax_t *,
+	uintmax_t, uintmax_t, unsigned int);
 extern bool xtables_strtoul(const char *, char **, uintmax_t *,
 	uintmax_t, uintmax_t);
 extern bool xtables_strtoui(const char *, char **, unsigned int *,
