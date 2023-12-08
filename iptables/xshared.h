@@ -47,10 +47,11 @@ enum {
 	/* below are for ebtables only */
 	OPT_LOGICALIN	= 1 << 18,
 	OPT_LOGICALOUT	= 1 << 19,
-	OPT_COMMAND	= 1 << 20,
-	OPT_ZERO	= 1 << 21,
+	OPT_LIST_C	= 1 << 20,
+	OPT_LIST_X	= 1 << 21,
+	OPT_LIST_MAC2	= 1 << 22,
 };
-#define NUMBER_OF_OPT	23
+#define NUMBER_OF_OPT	24
 
 enum {
 	CMD_NONE		= 0,
@@ -69,16 +70,18 @@ enum {
 	CMD_LIST_RULES		= 1 << 12,
 	CMD_ZERO_NUM		= 1 << 13,
 	CMD_CHECK		= 1 << 14,
+	CMD_CHANGE_COUNTERS	= 1 << 15, /* ebtables only */
+	CMD_INIT_TABLE		= 1 << 16, /* ebtables only */
 };
-#define NUMBER_OF_CMD		16
+#define NUMBER_OF_CMD		18
 
 struct xtables_globals;
 struct xtables_rule_match;
 struct xtables_target;
 
-#define OPTSTRING_COMMON "-:A:C:D:E:F::I:L::M:N:P:VX::Z::" "c:d:i:j:o:p:s:t:v"
-#define IPT_OPTSTRING	OPTSTRING_COMMON "R:S::W::" "46bfg:h::m:nw::x"
-#define ARPT_OPTSTRING	OPTSTRING_COMMON "R:S::" "h::l:nx" /* "m:" */
+#define OPTSTRING_COMMON "-:A:C:D:E:F::I:L::M:N:P:R:S::VX::Z::" "c:d:i:j:o:p:s:t:v"
+#define IPT_OPTSTRING	OPTSTRING_COMMON "W::" "46bfg:h::m:nw::x"
+#define ARPT_OPTSTRING	OPTSTRING_COMMON "h::l:nx" /* "m:" */
 #define EBT_OPTSTRING	OPTSTRING_COMMON "h"
 
 /* define invflags which won't collide with IPT ones.
@@ -136,6 +139,7 @@ struct iptables_command_state {
 	char *protocol;
 	int proto_used;
 	const char *jumpto;
+	int argc;
 	char **argv;
 	bool restore;
 };
@@ -247,13 +251,20 @@ struct addr_mask {
 	} mask;
 };
 
+enum {
+	CTR_OP_INC_PKTS = 1 << 0,
+	CTR_OP_DEC_PKTS = 1 << 1,
+	CTR_OP_INC_BYTES = 1 << 2,
+	CTR_OP_DEC_BYTES = 1 << 3,
+};
+
 struct xtables_args {
 	int		family;
-	uint16_t	proto;
 	uint8_t		flags;
 	uint16_t	invflags;
 	char		iniface[IFNAMSIZ], outiface[IFNAMSIZ];
 	unsigned char	iniface_mask[IFNAMSIZ], outiface_mask[IFNAMSIZ];
+	char		bri_iniface[IFNAMSIZ], bri_outiface[IFNAMSIZ];
 	bool		goto_set;
 	const char	*shostnetworkmask, *dhostnetworkmask;
 	const char	*pcnt, *bcnt;
@@ -262,6 +273,7 @@ struct xtables_args {
 	const char	*arp_hlen, *arp_opcode;
 	const char	*arp_htype, *arp_ptype;
 	unsigned long long pcnt_cnt, bcnt_cnt;
+	uint8_t		counter_op;
 	int		wait;
 };
 
@@ -273,11 +285,15 @@ struct xt_cmd_parse_ops {
 			      struct xtables_args *args);
 	const char *(*option_name)(int option);
 	int	(*option_invert)(int option);
+	int	(*command_default)(struct iptables_command_state *cs,
+				   struct xtables_globals *gl, bool invert);
+	void	(*print_help)(struct iptables_command_state *cs);
 };
 
 struct xt_cmd_parse {
 	unsigned int			command;
 	unsigned int			rulenum;
+	unsigned int			rulenum_end;
 	char				*table;
 	const char			*chain;
 	const char			*newname;
@@ -285,11 +301,15 @@ struct xt_cmd_parse {
 	bool				restore;
 	int				line;
 	int				verbose;
+	bool				rule_ranges;
 	struct xt_cmd_parse_ops		*ops;
 };
 
+void xtables_printhelp(struct iptables_command_state *cs);
 const char *ip46t_option_name(int option);
 int ip46t_option_invert(int option);
+int command_default(struct iptables_command_state *cs,
+		    struct xtables_globals *gl, bool invert);
 
 void do_parse(int argc, char *argv[],
 	      struct xt_cmd_parse *p, struct iptables_command_state *cs,
