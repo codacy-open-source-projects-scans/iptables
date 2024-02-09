@@ -141,7 +141,6 @@ struct xtables_globals ebtables_globals = {
 	.compat_rev		= nft_compatible_revision,
 };
 
-#define opts ebtables_globals.opts
 #define prog_name ebtables_globals.program_name
 #define prog_vers ebtables_globals.program_version
 
@@ -281,6 +280,7 @@ static int list_rules(struct nft_handle *h, const char *chain, const char *table
 /* This code is very similar to iptables/xtables.c:command_match() */
 static void ebt_load_match(const char *name)
 {
+	struct option *opts = xt_params->opts;
 	struct xtables_match *m;
 	size_t size;
 
@@ -298,17 +298,22 @@ static void ebt_load_match(const char *name)
 	xs_init_match(m);
 
 	if (m->x6_options != NULL)
-		opts = xtables_options_xfrm(opts, NULL,
+		opts = xtables_options_xfrm(xt_params->orig_opts, opts,
 					    m->x6_options, &m->option_offset);
 	else if (m->extra_opts != NULL)
-		opts = xtables_merge_options(opts, NULL,
+		opts = xtables_merge_options(xt_params->orig_opts, opts,
 					     m->extra_opts, &m->option_offset);
+	else
+		return;
+
 	if (opts == NULL)
 		xtables_error(OTHER_PROBLEM, "Can't alloc memory");
+	xt_params->opts = opts;
 }
 
 static void ebt_load_watcher(const char *name)
 {
+	struct option *opts = xt_params->opts;
 	struct xtables_target *watcher;
 	size_t size;
 
@@ -330,18 +335,23 @@ static void ebt_load_watcher(const char *name)
 	xs_init_target(watcher);
 
 	if (watcher->x6_options != NULL)
-		opts = xtables_options_xfrm(opts, NULL, watcher->x6_options,
+		opts = xtables_options_xfrm(xt_params->orig_opts, opts,
+					    watcher->x6_options,
 					    &watcher->option_offset);
 	else if (watcher->extra_opts != NULL)
-		opts = xtables_merge_options(opts, NULL, watcher->extra_opts,
+		opts = xtables_merge_options(xt_params->orig_opts, opts,
+					     watcher->extra_opts,
 					     &watcher->option_offset);
+	else
+		return;
+
 	if (opts == NULL)
 		xtables_error(OTHER_PROBLEM, "Can't alloc memory");
+	xt_params->opts = opts;
 }
 
 static void ebt_load_match_extensions(void)
 {
-	opts = ebt_original_options;
 	ebt_load_match("802_3");
 	ebt_load_match("arp");
 	ebt_load_match("ip");
@@ -355,10 +365,6 @@ static void ebt_load_match_extensions(void)
 
 	ebt_load_watcher("log");
 	ebt_load_watcher("nflog");
-
-	/* assign them back so do_parse() may
-	 * reset opts to orig_opts upon each call */
-	xt_params->orig_opts = opts;
 }
 
 void ebt_add_match(struct xtables_match *m,
@@ -538,8 +544,7 @@ void nft_fini_eb(struct nft_handle *h)
 		free(target->t);
 	}
 
-	if (opts != ebt_original_options)
-		free(opts);
+	free(xt_params->opts);
 
 	nft_fini(h);
 	xtables_fini();

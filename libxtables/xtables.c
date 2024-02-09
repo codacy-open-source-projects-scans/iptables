@@ -111,10 +111,8 @@ void basic_exit_err(enum xtables_exittype status, const char *msg, ...)
 
 void xtables_free_opts(int unused)
 {
-	if (xt_params->opts != xt_params->orig_opts) {
-		free(xt_params->opts);
-		xt_params->opts = NULL;
-	}
+	free(xt_params->opts);
+	xt_params->opts = NULL;
 }
 
 struct option *xtables_merge_options(struct option *orig_opts,
@@ -1420,6 +1418,10 @@ void xtables_rule_matches_free(struct xtables_rule_match **matches)
 			free(matchp->match->m);
 			matchp->match->m = NULL;
 		}
+		if (matchp->match->udata_size) {
+			free(matchp->match->udata);
+			matchp->match->udata = NULL;
+		}
 		if (matchp->match == matchp->match->next) {
 			free(matchp->match);
 			matchp->match = NULL;
@@ -2201,6 +2203,8 @@ const struct xtables_pprot xtables_chain_protos[] = {
 	{"mobility-header", IPPROTO_MH},
 	{"ipv6-mh",   IPPROTO_MH},
 	{"mh",        IPPROTO_MH},
+	{"dccp",      IPPROTO_DCCP},
+	{"ipcomp",    IPPROTO_COMP},
 	{"all",       0},
 	{NULL},
 };
