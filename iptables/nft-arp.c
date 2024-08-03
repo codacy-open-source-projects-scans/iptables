@@ -197,13 +197,23 @@ static void nft_arp_print_header(unsigned int format, const char *chain,
 	}
 }
 
+static void print_iface(char letter, const char *iface,
+			unsigned int format, bool invert, const char **sep)
+{
+	if (iface[0] == '\0' || (!strcmp(iface, "+") && !invert)) {
+		if (!(format & FMT_VIA))
+			return;
+		iface = (format & FMT_NUMERIC) ? "*" : "any";
+	}
+	printf("%s%s-%c %s", *sep, invert ? "! " : "", letter, iface);
+	*sep = " ";
+}
+
 static void nft_arp_print_rule_details(const struct iptables_command_state *cs,
 				       unsigned int format)
 {
 	const struct arpt_entry *fw = &cs->arp;
-	char iface[IFNAMSIZ+2];
 	const char *sep = "";
-	int print_iface = 0;
 	int i;
 
 	if (strlen(cs->jumpto)) {
@@ -211,40 +221,10 @@ static void nft_arp_print_rule_details(const struct iptables_command_state *cs,
 		sep = " ";
 	}
 
-	iface[0] = '\0';
-
-	if (fw->arp.iniface[0] != '\0') {
-		strcat(iface, fw->arp.iniface);
-		print_iface = 1;
-	}
-	else if (format & FMT_VIA) {
-		print_iface = 1;
-		if (format & FMT_NUMERIC) strcat(iface, "*");
-		else strcat(iface, "any");
-	}
-	if (print_iface) {
-		printf("%s%s-i %s", sep, fw->arp.invflags & IPT_INV_VIA_IN ?
-				   "! " : "", iface);
-		sep = " ";
-	}
-
-	print_iface = 0;
-	iface[0] = '\0';
-
-	if (fw->arp.outiface[0] != '\0') {
-		strcat(iface, fw->arp.outiface);
-		print_iface = 1;
-	}
-	else if (format & FMT_VIA) {
-		print_iface = 1;
-		if (format & FMT_NUMERIC) strcat(iface, "*");
-		else strcat(iface, "any");
-	}
-	if (print_iface) {
-		printf("%s%s-o %s", sep, fw->arp.invflags & IPT_INV_VIA_OUT ?
-				   "! " : "", iface);
-		sep = " ";
-	}
+	print_iface('i', fw->arp.iniface, format,
+		    fw->arp.invflags & IPT_INV_VIA_IN, &sep);
+	print_iface('o', fw->arp.outiface, format,
+		    fw->arp.invflags & IPT_INV_VIA_OUT, &sep);
 
 	if (fw->arp.smsk.s_addr != 0L) {
 		printf("%s%s-s %s", sep,
@@ -299,7 +279,8 @@ after_devdst:
 		sep = " ";
 	}
 
-	if (fw->arp.arpop_mask != 0) {
+	if (fw->arp.arpop_mask != 65535 || fw->arp.arpop != 0 ||
+	    fw->arp.invflags & IPT_INV_ARPOP) {
 		int tmp = ntohs(fw->arp.arpop);
 
 		printf("%s%s", sep, fw->arp.invflags & IPT_INV_ARPOP
@@ -329,7 +310,8 @@ after_devdst:
 		sep = " ";
 	}
 
-	if (fw->arp.arpro_mask != 0) {
+	if (fw->arp.arpro_mask != 65535 || fw->arp.arpro != 0 ||
+	    fw->arp.invflags & IPT_INV_PROTO) {
 		int tmp = ntohs(fw->arp.arpro);
 
 		printf("%s%s", sep, fw->arp.invflags & IPT_INV_PROTO
@@ -356,6 +338,8 @@ nft_arp_save_rule(const struct iptables_command_state *cs, unsigned int format)
 	printf("\n");
 }
 
+static void nft_arp_init_cs(struct iptables_command_state *cs);
+
 static void
 nft_arp_print_rule(struct nft_handle *h, struct nftnl_rule *r,
 		   unsigned int num, unsigned int format)
@@ -365,6 +349,7 @@ nft_arp_print_rule(struct nft_handle *h, struct nftnl_rule *r,
 	if (format & FMT_LINENUMBERS)
 		printf("%u ", num);
 
+	nft_arp_init_cs(&cs);
 	nft_rule_to_iptables_command_state(h, r, &cs);
 
 	nft_arp_print_rule_details(&cs, format);
