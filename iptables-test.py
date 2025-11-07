@@ -30,6 +30,7 @@ EBTABLES_SAVE = "ebtables-save"
 #IP6TABLES_SAVE = ['xtables-save','-6']
 
 EXTENSIONS_PATH = "extensions"
+TESTS_PATH = os.path.join(os.path.dirname(sys.argv[0]), "extensions")
 LOGFILE="/tmp/iptables-test.log"
 log_file = None
 
@@ -47,21 +48,34 @@ def maybe_colored(color, text, isatty):
     )
 
 
-def print_error(reason, filename=None, lineno=None):
+def print_error(reason, filename=None, lineno=None, log_file=sys.stderr):
     '''
     Prints an error with nice colors, indicating file and line number.
     '''
-    print(filename + ": " + maybe_colored('red', "ERROR", STDERR_IS_TTY) +
-        ": line %d (%s)" % (lineno, reason), file=sys.stderr)
+    print(filename + ": " + maybe_colored('red', "ERROR", log_file.isatty()) +
+        ": line %d (%s)" % (lineno, reason), file=log_file)
 
 
 def delete_rule(iptables, rule, filename, lineno, netns = None):
     '''
     Removes an iptables rule
+
+    Remove any --set-counters arguments, --delete rejects them.
     '''
+    delrule = rule.split()
+    for i in range(len(delrule)):
+        if delrule[i] in ['-c', '--set-counters']:
+            delrule.pop(i)
+            if ',' in delrule.pop(i):
+                break
+            if len(delrule) > i and delrule[i].isnumeric():
+                delrule.pop(i)
+            break
+    rule = " ".join(delrule)
+
     cmd = iptables + " -D " + rule
     ret = execute_cmd(cmd, filename, lineno, netns)
-    if ret == 1:
+    if ret != 0:
         reason = "cannot delete: " + iptables + " -I " + rule
         print_error(reason, filename, lineno)
         return -1
@@ -69,7 +83,7 @@ def delete_rule(iptables, rule, filename, lineno, netns = None):
     return 0
 
 
-def run_test(iptables, rule, rule_save, res, filename, lineno, netns):
+def run_test(iptables, rule, rule_save, res, filename, lineno, netns, stderr=sys.stderr):
     '''
     Executes an unit test. Returns the output of delete_rule().
 
@@ -93,7 +107,7 @@ def run_test(iptables, rule, rule_save, res, filename, lineno, netns):
     if ret:
         if res != "FAIL":
             reason = "cannot load: " + cmd
-            print_error(reason, filename, lineno)
+            print_error(reason, filename, lineno, stderr)
             return -1
         else:
             # do not report this error
@@ -101,7 +115,7 @@ def run_test(iptables, rule, rule_save, res, filename, lineno, netns):
     else:
         if res == "FAIL":
             reason = "should fail: " + cmd
-            print_error(reason, filename, lineno)
+            print_error(reason, filename, lineno, stderr)
             delete_rule(iptables, rule, filename, lineno, netns)
             return -1
 
@@ -140,7 +154,7 @@ def run_test(iptables, rule, rule_save, res, filename, lineno, netns):
     #
     if proc.returncode == -11:
         reason = command + " segfaults!"
-        print_error(reason, filename, lineno)
+        print_error(reason, filename, lineno, stderr)
         delete_rule(iptables, rule, filename, lineno, netns)
         return -1
 
@@ -150,7 +164,7 @@ def run_test(iptables, rule, rule_save, res, filename, lineno, netns):
     if matching < 0:
         if res == "OK":
             reason = "cannot find: " + iptables + " -I " + rule
-            print_error(reason, filename, lineno)
+            print_error(reason, filename, lineno, stderr)
             delete_rule(iptables, rule, filename, lineno, netns)
             return -1
         else:
@@ -159,7 +173,7 @@ def run_test(iptables, rule, rule_save, res, filename, lineno, netns):
     else:
         if res != "OK":
             reason = "should not match: " + cmd
-            print_error(reason, filename, lineno)
+            print_error(reason, filename, lineno, stderr)
             delete_rule(iptables, rule, filename, lineno, netns)
             return -1
 
@@ -228,10 +242,14 @@ def variant_res(res, variant, alt_res=None):
 
 def fast_run_possible(filename):
     '''
-    Keep things simple, run only for simple test files:
+    Return true if fast test run is possible.
+
+    To keep things simple, run only for simple test files:
     - no external commands
     - no multiple tables
     - no variant-specific results
+
+    :param filename: test file to inspect
     '''
     table = None
     rulecount = 0
@@ -253,6 +271,9 @@ def fast_run_possible(filename):
 def run_test_file_fast(iptables, filename, netns):
     '''
     Run a test file, but fast
+
+    Add all non-failing rules at once by use of iptables-restore, then check
+    all rules' listing at once by use of iptables-save.
 
     :param filename: name of the file with the test rules
     :param netns: network namespace to perform test run in
@@ -298,7 +319,7 @@ def run_test_file_fast(iptables, filename, netns):
             if res != "OK":
                 rule = chain + " -t " + table + " " + item[0]
                 ret = run_test(iptables, rule, rule_save,
-                               res, filename, lineno + 1, netns)
+                               res, filename, lineno + 1, netns, log_file)
 
                 if ret < 0:
                     return -1
@@ -385,44 +406,20 @@ def run_test_file_fast(iptables, filename, netns):
 
     return tests
 
-def run_test_file(filename, netns):
+def _run_test_file(iptables, filename, netns, suffix):
     '''
     Runs a test file
 
+    :param iptables: string with the iptables command to execute
     :param filename: name of the file with the test rules
     :param netns: network namespace to perform test run in
     '''
-    #
-    # if this is not a test file, skip.
-    #
-    if not filename.endswith(".t"):
-        return 0, 0
-
-    if "libipt_" in filename:
-        iptables = IPTABLES
-    elif "libip6t_" in filename:
-        iptables = IP6TABLES
-    elif "libxt_"  in filename:
-        iptables = IPTABLES
-    elif "libarpt_" in filename:
-        # only supported with nf_tables backend
-        if EXECUTABLE != "xtables-nft-multi":
-           return 0, 0
-        iptables = ARPTABLES
-    elif "libebt_" in filename:
-        # only supported with nf_tables backend
-        if EXECUTABLE != "xtables-nft-multi":
-           return 0, 0
-        iptables = EBTABLES
-    else:
-        # default to iptables if not known prefix
-        iptables = IPTABLES
 
     fast_failed = False
     if fast_run_possible(filename):
         tests = run_test_file_fast(iptables, filename, netns)
         if tests > 0:
-            print(filename + ": " + maybe_colored('green', "OK", STDOUT_IS_TTY))
+            print(filename + ": " + maybe_colored('green', "OK", STDOUT_IS_TTY) + suffix)
             return tests, tests
         fast_failed = True
 
@@ -503,20 +500,66 @@ def run_test_file(filename, netns):
     if netns:
         execute_cmd("ip netns del " + netns, filename)
     if total_test_passed:
-        suffix = ""
         if fast_failed:
-            suffix = maybe_colored('red', " but fast mode failed!", STDOUT_IS_TTY)
+            suffix += maybe_colored('red', " but fast mode failed!", STDOUT_IS_TTY)
         print(filename + ": " + maybe_colored('green', "OK", STDOUT_IS_TTY) + suffix)
 
     f.close()
     return tests, passed
 
+def run_test_file(filename, netns):
+    '''
+    Runs a test file
+
+    :param filename: name of the file with the test rules
+    :param netns: network namespace to perform test run in
+    '''
+    #
+    # if this is not a test file, skip.
+    #
+    if not filename.endswith(".t"):
+        return 0, 0
+
+    if "libipt_" in filename:
+        xtables = [ IPTABLES ]
+    elif "libip6t_" in filename:
+        xtables = [ IP6TABLES ]
+    elif "libxt_"  in filename:
+        xtables = [ IPTABLES, IP6TABLES ]
+    elif "libarpt_" in filename:
+        # only supported with nf_tables backend
+        if EXECUTABLE != "xtables-nft-multi":
+           return 0, 0
+        xtables = [ ARPTABLES ]
+    elif "libebt_" in filename:
+        # only supported with nf_tables backend
+        if EXECUTABLE != "xtables-nft-multi":
+           return 0, 0
+        xtables = [ EBTABLES ]
+    else:
+        # default to iptables if not known prefix
+        xtables = [ IPTABLES ]
+
+    tests = 0
+    passed = 0
+    print_result = False
+    suffix = ""
+    for iptables in xtables:
+        if len(xtables) > 1:
+            suffix = "({})".format(iptables)
+
+        file_tests, file_passed = _run_test_file(iptables, filename, netns, suffix)
+        if file_tests:
+            tests += file_tests
+            passed += file_passed
+
+    return tests, passed
 
 def show_missing():
     '''
     Show the list of missing test files
     '''
-    file_list = os.listdir(EXTENSIONS_PATH)
+    file_list = os.listdir(TESTS_PATH)
     testfiles = [i for i in file_list if i.endswith('.t')]
     libfiles = [i for i in file_list
                 if i.startswith('lib') and i.endswith('.c')]
@@ -570,6 +613,8 @@ def main():
                         help='Check for missing tests')
     parser.add_argument('-n', '--nftables', action='store_true',
                         help='Test iptables-over-nftables')
+    parser.add_argument('--compat', action='store_true',
+                        help='Test iptables-over-nftables in forced compat mode')
     parser.add_argument('-N', '--netns', action='store_const',
                         const='____iptables-container-test',
                         help='Test netnamespace path')
@@ -589,8 +634,10 @@ def main():
         variants.append("legacy")
     if args.nftables:
         variants.append("nft")
+    if args.compat:
+        variants.append("nft-compat")
     if len(variants) == 0:
-        variants = [ "legacy", "nft" ]
+        variants = [ "legacy", "nft", "nft-compat" ]
 
     if os.getuid() != 0:
         print("You need to be root to run this, sorry", file=sys.stderr)
@@ -609,8 +656,14 @@ def main():
     total_passed = 0
     total_tests = 0
     for variant in variants:
+
+        exec_infix = variant
+        if variant == "nft-compat":
+            os.putenv("XTABLES_COMPAT", "2")
+            exec_infix = "nft"
+
         global EXECUTABLE
-        EXECUTABLE = "xtables-" + variant + "-multi"
+        EXECUTABLE = "xtables-" + exec_infix + "-multi"
 
         test_files = 0
         tests = 0
@@ -627,8 +680,8 @@ def main():
         if args.filename:
             file_list = args.filename
         else:
-            file_list = [os.path.join(EXTENSIONS_PATH, i)
-                         for i in os.listdir(EXTENSIONS_PATH)
+            file_list = [os.path.join(TESTS_PATH, i)
+                         for i in os.listdir(TESTS_PATH)
                          if i.endswith('.t')]
             file_list.sort()
 

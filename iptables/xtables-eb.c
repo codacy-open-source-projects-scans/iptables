@@ -131,6 +131,7 @@ struct option ebt_original_options[] =
 	{ "init-table"     , no_argument      , 0, 11  },
 	{ "concurrent"     , no_argument      , 0, 13  },
 	{ "check"          , required_argument, 0, 14  },
+	{ "compat"         , no_argument      , 0, 20  },
 	{ 0 }
 };
 
@@ -234,6 +235,7 @@ void nft_bridge_print_help(struct iptables_command_state *cs)
 "[!] --logical-out name[+]     : logical bridge output interface name\n"
 "--set-counters -c chain\n"
 "          pcnt bcnt           : set the counters of the to be added rule\n"
+"--compat                      : append compatibility data to new rules\n"
 "--modprobe -M program         : try to insert modules using this program\n"
 "--concurrent                  : use a file lock to support concurrent scripts\n"
 "--verbose -v                  : verbose mode\n"
@@ -367,27 +369,21 @@ static void ebt_load_match_extensions(void)
 	ebt_load_watcher("nflog");
 }
 
-void ebt_add_match(struct xtables_match *m,
-		   struct iptables_command_state *cs)
+struct xtables_match *ebt_add_match(struct xtables_match *m,
+				    struct iptables_command_state *cs)
 {
 	struct xtables_rule_match **rule_matches = &cs->matches;
-	struct xtables_match *newm;
 	struct ebt_match *newnode, **matchp;
-	struct xt_entry_match *m2;
+	struct xtables_match *newm;
 
 	newm = xtables_find_match(m->name, XTF_LOAD_MUST_SUCCEED, rule_matches);
 	if (newm == NULL)
 		xtables_error(OTHER_PROBLEM,
 			      "Unable to add match %s", m->name);
 
-	m2 = xtables_calloc(1, newm->m->u.match_size);
-	memcpy(m2, newm->m, newm->m->u.match_size);
-	memset(newm->m->data, 0, newm->size);
+	newm->m = xtables_calloc(1, m->m->u.match_size);
+	memcpy(newm->m, m->m, m->m->u.match_size);
 	xs_init_match(newm);
-	newm->m = m2;
-
-	newm->mflags = m->mflags;
-	m->mflags = 0;
 
 	/* glue code for watchers */
 	newnode = xtables_calloc(1, sizeof(struct ebt_match));
@@ -397,26 +393,24 @@ void ebt_add_match(struct xtables_match *m,
 	for (matchp = &cs->match_list; *matchp; matchp = &(*matchp)->next)
 		;
 	*matchp = newnode;
+
+	return newm;
 }
 
-void ebt_add_watcher(struct xtables_target *watcher,
-		     struct iptables_command_state *cs)
+struct xtables_target *ebt_add_watcher(struct xtables_target *watcher,
+				       struct iptables_command_state *cs)
 {
 	struct ebt_match *newnode, **matchp;
 	struct xtables_target *clone;
 
 	clone = xtables_malloc(sizeof(struct xtables_target));
 	memcpy(clone, watcher, sizeof(struct xtables_target));
-	clone->udata = NULL;
-	clone->tflags = watcher->tflags;
 	clone->next = clone;
+	clone->udata = NULL;
+	xs_init_target(clone);
 
 	clone->t = xtables_calloc(1, watcher->t->u.target_size);
 	memcpy(clone->t, watcher->t, watcher->t->u.target_size);
-
-	memset(watcher->t->data, 0, watcher->size);
-	xs_init_target(watcher);
-	watcher->tflags = 0;
 
 
 	newnode = xtables_calloc(1, sizeof(struct ebt_match));
@@ -425,6 +419,8 @@ void ebt_add_watcher(struct xtables_target *watcher,
 	for (matchp = &cs->match_list; *matchp; matchp = &(*matchp)->next)
 		;
 	*matchp = newnode;
+
+	return clone;
 }
 
 int ebt_command_default(struct iptables_command_state *cs,
@@ -476,8 +472,8 @@ int ebt_command_default(struct iptables_command_state *cs,
 		if (cs->c < m->option_offset ||
 		    cs->c >= m->option_offset + XT_OPTION_OFFSET_SCALE)
 			continue;
+		m = ebt_add_match(m, cs);
 		xtables_option_mpcall(cs->c, cs->argv, ebt_invert, m, &cs->eb);
-		ebt_add_match(m, cs);
 		return 0;
 	}
 
@@ -491,8 +487,8 @@ int ebt_command_default(struct iptables_command_state *cs,
 		if (cs->c < t->option_offset ||
 		    cs->c >= t->option_offset + XT_OPTION_OFFSET_SCALE)
 			continue;
+		t = ebt_add_watcher(t, cs);
 		xtables_option_tpcall(cs->c, cs->argv, ebt_invert, t, &cs->eb);
-		ebt_add_watcher(t, cs);
 		return 0;
 	}
 	if (cs->c == ':')
@@ -568,6 +564,7 @@ int do_commandeb(struct nft_handle *h, int argc, char *argv[], char **table,
 		.line		= line,
 		.rule_ranges	= true,
 		.ops		= &h->ops->cmd_parse,
+		.compat		= compat_env_val(),
 	};
 	int ret = 0;
 
@@ -577,6 +574,7 @@ int do_commandeb(struct nft_handle *h, int argc, char *argv[], char **table,
 	do_parse(argc, argv, &p, &cs, &args);
 
 	h->verbose	= p.verbose;
+	h->compat	= p.compat;
 
 	t = nft_table_builtin_find(h, p.table);
 	if (!t)
